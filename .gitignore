@@ -29,6 +29,7 @@
 *.dylib
 
 # Executables
+/embtop
 *.exe
 *.out
 *.app
