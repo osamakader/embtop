@@ -8,7 +8,7 @@ BINDIR ?= $(PREFIX)/bin
 TARGET := embtop
 SRCS := src/main.c src/utils.c src/system.c src/process.c src/render.c
 
-.PHONY: all clean install uninstall
+.PHONY: all clean install uninstall check
 
 all: $(TARGET)
 
@@ -24,3 +24,9 @@ uninstall:
 
 clean:
 	rm -f "$(TARGET)"
+
+check: $(TARGET)
+	./$(TARGET) -h
+
+distcheck: $(TARGET)
+	./$(TARGET) -1
