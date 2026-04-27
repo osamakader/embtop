@@ -39,7 +39,7 @@ Source layout:
 - `src/process.c`: process enumeration, CPU deltas, and sorting.
 - `src/render.c`: compact ANSI text UI.
 - `src/utils.c`: small file-reading helpers shared by procfs/sysfs readers.
-- `src/embtop.h`: shared data structures and module interfaces.
+- `include/embtop.h`: shared data structures and module interfaces.
 
 ## Usage
 
@@ -54,6 +54,8 @@ Options:
 - `-d delay_ms`: refresh interval in milliseconds, default `1000`.
 - `-n processes`: number of top processes to display, default `5`.
 - `-1`: sample once and exit, useful for logs or watchdog scripts.
+
+While running interactively, press `q` to quit.
 
 ## Data Sources
 
