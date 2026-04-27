@@ -7,10 +7,17 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/select.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t keep_running = 1;
+
+struct terminal_state {
+    struct termios original;
+    bool active;
+};
 
 static void handle_signal(int signum)
 {
@@ -18,13 +25,65 @@ static void handle_signal(int signum)
     keep_running = 0;
 }
 
-static void sleep_ms(int delay_ms)
+static bool terminal_setup(struct terminal_state *state)
 {
-    struct timespec req;
-    req.tv_sec = delay_ms / 1000;
-    req.tv_nsec = (long)(delay_ms % 1000) * 1000000L;
+    if (!isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &state->original) == -1) {
+        state->active = false;
+        return false;
+    }
 
-    while (keep_running && nanosleep(&req, &req) == -1 && errno == EINTR) {
+    struct termios raw = state->original;
+    raw.c_lflag &= (tcflag_t) ~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == -1) {
+        state->active = false;
+        return false;
+    }
+
+    state->active = true;
+    return true;
+}
+
+static void terminal_restore(const struct terminal_state *state)
+{
+    if (state->active) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &state->original);
+    }
+}
+
+static void wait_for_refresh_or_quit(int delay_ms, bool read_input)
+{
+    if (!read_input) {
+        struct timespec req;
+        req.tv_sec = delay_ms / 1000;
+        req.tv_nsec = (long)(delay_ms % 1000) * 1000000L;
+
+        while (keep_running && nanosleep(&req, &req) == -1 && errno == EINTR) {
+        }
+        return;
+    }
+
+    struct timeval timeout;
+    timeout.tv_sec = delay_ms / 1000;
+    timeout.tv_usec = (delay_ms % 1000) * 1000;
+
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(STDIN_FILENO, &readfds);
+
+    int ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &timeout);
+    if (ready <= 0 || !FD_ISSET(STDIN_FILENO, &readfds)) {
+        return;
+    }
+
+    char ch = '\0';
+    while (read(STDIN_FILENO, &ch, 1) == 1) {
+        if (ch == 'q' || ch == 'Q') {
+            keep_running = 0;
+            break;
+        }
     }
 }
 
@@ -84,6 +143,7 @@ int main(int argc, char **argv)
     struct mem_sample mem = {0};
     struct proc_list prev_procs = {0};
     struct proc_list procs = {0};
+    struct terminal_state terminal = {0};
 
     if (!read_cpu_sample(&prev_cpu) || !read_processes(&prev_procs)) {
         fprintf(stderr, "failed to read initial /proc samples\n");
@@ -92,12 +152,16 @@ int main(int argc, char **argv)
     }
 
     if (!once) {
+        terminal_setup(&terminal);
         printf("\033[?25l");
         fflush(stdout);
     }
 
     do {
-        sleep_ms(delay_ms);
+        wait_for_refresh_or_quit(delay_ms, terminal.active);
+        if (!keep_running) {
+            break;
+        }
 
         if (!read_cpu_sample(&cpu) || !read_mem_sample(&mem) || !read_processes(&procs)) {
             fprintf(stderr, "failed to read system samples\n");
@@ -122,6 +186,7 @@ int main(int argc, char **argv)
 
     if (!once) {
         printf("\033[?25h\n");
+        terminal_restore(&terminal);
     }
 
     proc_list_free(&prev_procs);
